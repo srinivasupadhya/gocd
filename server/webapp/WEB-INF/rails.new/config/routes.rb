@@ -93,6 +93,8 @@ Go::Application.routes.draw do
   delete "admin/:stage_parent/:pipeline_name/stages/:stage_name/job/:job_name/tasks/:task_index" => "admin/tasks#destroy", constraints: {pipeline_name: PIPELINE_NAME_FORMAT, stage_name: STAGE_NAME_FORMAT, job_name: JOB_NAME_FORMAT, task_index: NON_NEGATIVE_INTEGER, stage_parent: /(pipelines|templates)/}, :current_tab => "tasks", as: :admin_task_delete
   put "admin/:stage_parent/:pipeline_name/stages/:stage_name/job/:job_name/tasks/:type/:task_index" => "admin/tasks#update", constraints: {pipeline_name: PIPELINE_NAME_FORMAT, stage_name: STAGE_NAME_FORMAT, job_name: JOB_NAME_FORMAT, task_index: NON_NEGATIVE_INTEGER, stage_parent: /(pipelines|templates)/}, :current_tab => "tasks", as: :admin_task_update
 
+  get "admin/config/value_stream_map" => "admin/value_stream_map#index", as: :admin_vsm_show
+
   get "admin/config_xml" => "admin/configuration#show", as: :config_view
   put "admin/config_xml" => "admin/configuration#update", as: :config_update
   get "admin/config_xml/edit" => "admin/configuration#edit", as: :config_edit

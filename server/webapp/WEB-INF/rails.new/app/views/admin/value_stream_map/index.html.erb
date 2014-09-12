@@ -1,0 +1,401 @@
+<%- @view_title = "Administration" -%>
+
+<div class="content">
+  <div id="vsm-container">
+  </div>
+  <div id="vsm-overlay">
+    <div class="popup vsm-entity"></div>
+  </div>
+</div>
+<div class='pan' style='display: none;'>
+    <div class="constrainer">
+        <div class='knob'></div>
+    </div>
+    <canvas id='canvas'></canvas>
+</div>
+<div id='pre-loader-overlay'>
+    <div class='loading'></div>
+</div>
+
+<script type="text/javascript">
+    var dataMap = {};
+    var childMap = {};
+    var parentMap = {};
+    var rootNodes = [];
+    var leafNodes = [];
+    var depthMap = {};
+    var layerMap = [];
+
+    Util.on_load(function () {
+        resizeMapContainer();
+        function resizeMapContainer() {
+            $j("#vsm-container").height($j(window).height() - 160);
+        }
+
+        $j(window).resize(function () {
+            resizeMapContainer();
+        });
+
+        $j('#pre-loader-overlay').show();
+
+        jQuery.ajax({
+            url: "<%= pipeline_group_config_list_api_path %>"
+        }).done(function (data) {
+            createVSMGraph(data);
+
+            console.log(dataMap);
+            console.log(childMap);
+            console.log(parentMap);
+            console.log(rootNodes);
+            console.log(leafNodes);
+            console.log(depthMap);
+            console.log(layerMap);
+        });
+    });
+
+    function createVSMGraph(data) {
+        var pipelineArray = [];
+        for (var i = 0; i < data.length; i++) {
+            pipelineArray = pipelineArray.concat(data[i].pipelines);
+        }
+
+        buildGraph(pipelineArray);
+
+        populateRootNodes();
+
+        var numberOfLayers = assignLayer();
+
+        createDummyNodes();
+
+        assignDepth(numberOfLayers);
+
+        populateLayerMap(numberOfLayers);
+
+        for (var nodeId in dataMap) {
+            dataMap[nodeId].parents = parentMap[nodeId] != null ? parentMap[nodeId] : [];
+            dataMap[nodeId].dependents = childMap[nodeId] != null ? childMap[nodeId] : [];
+        }
+
+        var dataForVSM = new Object();
+        dataForVSM.levels = layerMap;
+        vsm = new VSM(dataForVSM, "#vsm-container", new Graph_Renderer("#vsm-container"), "#pre-loader-overlay").render();
+    }
+
+    function buildGraph(data) {
+        for (var i = 0; i < data.length; i++) {
+            var currentNode = data[i];
+            currentNode.id = currentNode.name;
+            currentNode.node_type = "PIPELINE";
+            currentNode.locator = "/go/admin/pipelines/" + currentNode.name + "/general";
+            currentNode.instances = [];
+            var instanceData = new Object();
+            instanceData.label = "";
+            instanceData.locator = "N/A";
+            instanceData.stages = currentNode.stages;
+            for (var j = 0; j < instanceData.stages.length; j++) {
+                instanceData.stages[j].locator = "/go/admin/pipelines/" + currentNode.name + "/stages/" + instanceData.stages[j].name + "/settings";
+            }
+            currentNode.instances.push(instanceData);
+            dataMap[currentNode.name] = currentNode;
+
+            for (var j = 0; j < currentNode.materials.length; j++) {
+                var currentChildNode = currentNode.materials[j];
+                if (currentChildNode.type == "Pipeline") {
+                    addToMaps(currentNode.name, currentChildNode.description);
+                }
+                else {
+                    currentChildNode.id = currentChildNode.fingerprint;
+                    currentChildNode.name = currentChildNode.description;
+                    currentChildNode.instances = [];
+                    currentChildNode.node_type = currentChildNode.type.toUpperCase();
+                    dataMap[currentChildNode.fingerprint] = currentChildNode;
+
+                    addToMaps(currentNode.name, currentChildNode.fingerprint);
+                }
+            }
+        }
+    }
+
+    function addToMaps(child, parent) {
+        addToMap(childMap, parent, child);
+        addToMap(parentMap, child, parent);
+    }
+
+    function addToMap(map, key, value) {
+        var valueArray = map[key];
+        if (valueArray == null) {
+            valueArray = [];
+        }
+        valueArray.push(value);
+        map[key] = valueArray;
+    }
+
+    function populateRootNodes() {
+        for (var nodeId in dataMap) {
+            var parentNodeIds = parentMap[nodeId];
+            if (parentNodeIds == null || parentNodeIds.length == 0) {
+                rootNodes.push(nodeId);
+            }
+        }
+    }
+
+    function assignLayer() {
+        for (var nodeId in dataMap) {
+            dataMap[nodeId].layer = 1;
+        }
+
+        var topologicalOrder = getTopologicalOrder();
+
+        var numberOfLayers = assignLayerToChildNodes(topologicalOrder);
+
+        pushRootNodesCloserToChildNodes();
+
+        return numberOfLayers;
+    }
+
+    function getTopologicalOrder() {
+        var visitedNodes = {};
+        var topologicalOrder = [];
+
+        for (var i = 0; i < rootNodes.length; i++) {
+            getTopologicalOrderFor(rootNodes[i], visitedNodes, topologicalOrder);
+        }
+
+        topologicalOrder.reverse();
+        return topologicalOrder;
+    }
+
+    function getTopologicalOrderFor(nodeId, visitedNodes, topologicalOrder) {
+        if (visitedNodes[nodeId] == true) {
+            return;
+        }
+        visitedNodes[nodeId] = true;
+        var childrenNodeIds = childMap[nodeId];
+        if (childrenNodeIds != null && childrenNodeIds.length > 0) {
+            for (var i = 0; i < childrenNodeIds.length; i++) {
+                getTopologicalOrderFor(childrenNodeIds[i], visitedNodes, topologicalOrder);
+            }
+        }
+        topologicalOrder.push(nodeId);
+    }
+
+    function assignLayerToChildNodes(topologicalOrder) {
+        var maxLayer = 1;
+        for (var i = 0; i < topologicalOrder.length; i++) {
+            var currentNodeId = topologicalOrder[i];
+            var currentNode = dataMap[currentNodeId];
+            var childNodeLayer = currentNode.layer + 1;
+
+            var childrenNodeIds = childMap[currentNodeId];
+            if (childrenNodeIds != null && childrenNodeIds.length > 0) {
+                for (var j = 0; j < childrenNodeIds.length; j++) {
+                    var currentChildNodeId = childrenNodeIds[j];
+                    var currentChildNode = dataMap[currentChildNodeId];
+
+                    if (currentChildNode.layer == null || currentChildNode.layer < childNodeLayer) {
+                        currentChildNode.layer = childNodeLayer;
+
+                        if (childNodeLayer > maxLayer) {
+                            maxLayer = childNodeLayer;
+                        }
+                    }
+                }
+            }
+        }
+        return maxLayer;
+    }
+
+    function pushRootNodesCloserToChildNodes() {
+        for (var i = 0; i < rootNodes.length; i++) {
+            var currentRootNodeId = rootNodes[i];
+            var currentRootNode = dataMap[currentRootNodeId];
+            var childrenNodeIds = childMap[currentRootNodeId];
+
+            var minLayer = Number.MAX_VALUE;
+            if (childrenNodeIds != null && childrenNodeIds.length > 0) {
+                for (var j = 0; j < childrenNodeIds.length; j++) {
+                    var currentChildNodeId = childrenNodeIds[j];
+                    var currentChildNode = dataMap[currentChildNodeId];
+
+                    if (currentChildNode.layer < minLayer) {
+                        minLayer = currentChildNode.layer;
+                    }
+                }
+            }
+
+            if (minLayer != Number.MAX_VALUE && currentRootNode.layer < minLayer - 1) {
+                currentRootNode.layer = minLayer - 1;
+            }
+        }
+    }
+
+    function createDummyNodes() {
+        var visitedNodes = {};
+        for (var i = 0; i < rootNodes.length; i++) {
+            createDummyNodesFor(rootNodes[i], visitedNodes);
+        }
+    }
+
+    function createDummyNodesFor(nodeId, visitedNodes) {
+        if (visitedNodes[nodeId] == true) {
+            return;
+        }
+        visitedNodes[nodeId] = true;
+        var node = dataMap[nodeId];
+        var childrenNodeIds = childMap[nodeId];
+        if (childrenNodeIds != null && childrenNodeIds.length > 0) {
+            for (var i = 0; i < childrenNodeIds.length; i++) {
+                var currentChildNodeId = childrenNodeIds[i];
+                var currentChildNode = dataMap[currentChildNodeId];
+
+                if (currentChildNode.layer > node.layer + 1) {
+                    var dummyNode = new Object();
+                    dummyNode.id = guid();
+                    // check for uniqueness
+                    dummyNode.name = "dummy-" + dummyNode.id;
+                    dummyNode.instances = [];
+                    dummyNode.node_type = "DUMMY";
+                    dummyNode.layer = node.layer + 1;
+
+                    dataMap[dummyNode.id] = dummyNode;
+                    addToMap(parentMap, dummyNode.id, nodeId);
+                    addToMap(childMap, dummyNode.id, currentChildNodeId);
+
+                    replace(childMap[nodeId], currentChildNodeId, dummyNode.id);
+                    replace(parentMap[currentChildNodeId], nodeId, dummyNode.id);
+
+                    createDummyNodesFor(dummyNode, visitedNodes);
+                } else {
+                    createDummyNodesFor(currentChildNodeId, visitedNodes);
+                }
+            }
+        }
+    }
+
+    var guid = (function () {
+        function s4() {
+            return Math.floor((1 + Math.random()) * 0x10000).toString(16).substring(1);
+        }
+
+        return function () {
+            return s4() + s4() + '-' + s4() + '-' + s4() + '-' + s4() + '-' + s4() + s4() + s4();
+        };
+    })();
+
+    function replace(array, key1, key2) {
+        var index = array.indexOf(key1);
+        array[index] = key2;
+    }
+
+    function assignDepth(numberOfLayers) {
+        for (var i = 0; i < numberOfLayers; i++) {
+            depthMap[i + 1] = 0;
+        }
+
+        var visitedNodes = {};
+        for (var i = 0; i < rootNodes.length; i++) {
+            var currentRootNodeId = rootNodes[i];
+            var currentRootNode = dataMap[currentRootNodeId];
+            currentRootNode.depth = incrementMaxDepthForLayer(currentRootNode.layer);
+
+            initializeDepthFor(currentRootNodeId, visitedNodes);
+        }
+
+        //barycenter();
+    }
+
+    function initializeDepthFor(nodeId, visitedNodes) {
+        if (visitedNodes[nodeId] == true) {
+            return;
+        }
+        visitedNodes[nodeId] = true;
+        var childrenNodeIds = childMap[nodeId];
+        if (childrenNodeIds != null && childrenNodeIds.length > 0) {
+            for (var i = 0; i < childrenNodeIds.length; i++) {
+                var currentChildNodeId = childrenNodeIds[i];
+                var currentChildNode = dataMap[currentChildNodeId];
+
+                if (currentChildNode.depth == null) {
+                    currentChildNode.depth = incrementMaxDepthForLayer(currentChildNode.layer);
+                }
+
+                initializeDepthFor(currentChildNodeId, visitedNodes);
+            }
+        }
+    }
+
+    function incrementMaxDepthForLayer(layer) {
+        depthMap[layer] = depthMap[layer] + 1;
+        return depthMap[layer];
+    }
+
+    function barycenter() {
+        populateLeafNodes();
+
+        for (var i = 1; i <= 24; i++) {
+            for (var j = 0; j < rootNodes.length; j++) {
+                computeDepth(rootNodes[j], true);
+            }
+
+            for (var j = 0; j < leafNodes.length; j++) {
+                computeDepth(leafNodes[j], false);
+            }
+        }
+    }
+
+    function populateLeafNodes() {
+        for (var nodeId in dataMap) {
+            var childrenNodeIds = childMap[nodeId];
+            if (childrenNodeIds == null || childrenNodeIds.length == 0) {
+                leafNodes.push(nodeId);
+            }
+        }
+    }
+
+    function computeDepth(nodeId, isChild) {
+        var adjacentNodeIds;
+        if (isChild) {
+            adjacentNodeIds = childMap[nodeId];
+        } else {
+            adjacentNodeIds = parentMap[nodeId];
+        }
+
+        if (adjacentNodeIds != null && adjacentNodeIds.length > 0) {
+            var totalDepth = 0;
+            for (var i = 0; i < adjacentNodeIds.length; i++) {
+                var adjacentNode = dataMap[adjacentNodeIds[i]];
+                totalDepth += adjacentNode.depth;
+            }
+            var computedDepth = Math.floor(totalDepth / adjacentNodeIds.length);
+            if (computedDepth == 0) {
+                computedDepth = 1;
+            }
+            // make sure its unique
+            var node = dataMap[nodeId];
+            node.depth = computedDepth;
+
+            for (var i = 0; i < adjacentNodeIds.length; i++) {
+                computeDepth(adjacentNodeIds[i], isChild);
+            }
+        }
+    }
+
+    function populateLayerMap(numberOfLayers) {
+        for (var i = 0; i < numberOfLayers; i++) {
+            var layer = new Object();
+            layer.nodes = [];
+            layerMap.push(layer);
+        }
+
+        for (var nodeId in dataMap) {
+            var layerIndex = dataMap[nodeId].layer - 1;
+            layerMap[layerIndex].nodes.push(dataMap[nodeId]);
+        }
+
+        for (var i = 0; i < numberOfLayers; i++) {
+            layerMap[i].nodes.sort(function (a, b) {
+                return a.depth - b.depth;
+            });
+        }
+    }
+</script>
