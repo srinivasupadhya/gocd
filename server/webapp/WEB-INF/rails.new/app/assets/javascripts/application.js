@@ -20,8 +20,6 @@
 //= require "lib/bootstrap-2.3.2.min.js"
 //= require "lib/angular-1.2.22.min.js"
 //= require "lib/angular-resource-1.2.22.min.js"
-//= require "lib/angular.min.js.map"
-//= require "lib/angular-resource.min.js.map"
 //= require "lib/ui-bootstrap-tpls-0.11.0.min.js"
 //= require "lib/effects-1.8.0.js"
 //= require "lib/accordion-2.0.js"
