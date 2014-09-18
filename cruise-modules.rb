@@ -19,7 +19,7 @@ require 'buildr/core/util'
 
 task :prepare do
   # Temporary: Feature toggle "use.new.rails" is related to this.
-  maven_profiles_for_rails = ENV['USE_NEW_RAILS'] == "Y" ? "newrails,!oldrails" : "oldrails,!newrails"
+  maven_profiles_for_rails = ENV['USE_NEW_RAILS'] != "N" ? "newrails,!oldrails" : "oldrails,!newrails"
   puts "Using Maven profiles: #{maven_profiles_for_rails}"
 
   system("mvn install -DskipTests -P #{maven_profiles_for_rails}") || raise("Failed to run: mvn install -DskipTests -P #{maven_profiles_for_rails}")
@@ -470,13 +470,16 @@ define "cruise:misc", :layout => submodule_layout_for_different_src("server") do
   end
 
   task :prepare_jsunit_file_structure do
-    raise "server/target/all.js not found! did you run ./bn clean cruise:prepare?" unless File.exist?("server/target/all.js")
+    js_file = ENV['USE_NEW_RAILS'] != "N" ? Dir["server/target/webapp/WEB-INF/rails.new/public/assets/*.js"][0] : "server/target/all.js"
+    raise "#{js_file} not found! did you run ./bn clean cruise:prepare?" unless File.exist?(js_file)
 
     mkdir_p _(:target, 'jsunit/compressed')
     filter_files(project('cruise:server').path_to("jsunit"), _(:target, "jsunit"))
     cp project('cruise:server').path_to("jsunit.xml"), _(:target)
-    cp "server/target/all.js", _(:target, 'jsunit/compressed')
-    cp "server/target/webapp/compressed/d3-3.1.5.min.js", _(:target, 'jsunit/compressed')
+    dest_file = _(:target, 'jsunit/compressed') + "/all.js"
+    rm dest_file if File.exist?(dest_file)
+    cp js_file, dest_file
+    cp "server/webapp/javascripts/lib/d3-3.1.5.min.js", _(:target, 'jsunit/compressed')
     cp "server/webapp/javascripts/test_helper.js", _(:target, 'jsunit/compressed')
     cp project('cruise:server').path_to('webapp/stylesheets/module.css'), _(:target, 'jsunit/css/module.css')
   end
